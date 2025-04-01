@@ -1,9 +1,151 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
-    <base target="_top">
+    <base target="_top" />
+    <link
+      rel="stylesheet"
+      href="https://ssl.gstatic.com/docs/script/css/add-ons1.css"
+    />
   </head>
   <body>
-    
+    <form onsubmit="onSubmit(event)">
+      <div class="block form-group">
+        <label for="file">Drag and drop or choose a CSV file to preview</label>
+        <input
+          id="file"
+          type="file"
+          accept="text/csv"
+          onclick="this.value = ''"
+          ondrop="this.value = ''"
+          onchange="onChange(event)"
+        />
+      </div>
+      <div class="block">
+        <div hidden>
+          <button id="submit" class="action"></button>
+          <button type="button" onclick="google.script.host.close()">
+            Cancel
+          </button>
+        </div>
+      </div>
+      <div class="block"><div class="error" hidden></div></div>
+      <div class="block">
+        <div id="preview" hidden>
+          <h2>Number of transactions to import</h2>
+          <table>
+            <tr id="add">
+              <th>To add</th>
+              <td>&#x2795;</td>
+              <td></td>
+            </tr>
+            <tr id="modify">
+              <th>To modify</th>
+              <td>&#x270F;&#xFE0F;</td>
+              <td></td>
+            </tr>
+            <tr id="identical">
+              <th>Already identical</th>
+              <td>&#x231B;</td>
+              <td></td>
+            </tr>
+            <tr id="total">
+              <th>Total</th>
+              <td>&#x1F7F0;</td>
+              <td></td>
+            </tr>
+          </table>
+          <h2>Which headers match</h2>
+          <table></table>
+        </div>
+      </div>
+    </form>
+    <script>
+      function onChange(event) {
+        preview.hidden = true;
+        error.hidden = true;
+        form.elements.submit.disabled = true;
+        form.elements.submit.replaceChildren("Loading preview ...");
+        form.elements.submit.parentElement.hidden = false;
+        const [file] = event.target.files;
+        reader.readAsText(file);
+      }
+
+      const preview = document.getElementById("preview");
+      const [error] = document.getElementsByClassName("error");
+      const [form] = document.forms;
+      const reader = new FileReader();
+      reader.addEventListener("load", () => onLoad());
+      reader.addEventListener("error", () => onError());
+
+      async function onLoad() {
+        try {
+          const { nAdd, nModify, nTotal, header } = await new Promise(
+            (resolve, reject) =>
+              google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)
+                .doImport(reader.result, true),
+          );
+          nTable.rows.add.cells[2].replaceChildren(nAdd);
+          nTable.rows.add.hidden = nAdd < 1;
+          nTable.rows.modify.cells[2].replaceChildren(nModify);
+          nTable.rows.modify.hidden = nModify < 1;
+          nTable.rows.identical.cells[2].replaceChildren(
+            nTotal - nAdd - nModify,
+          );
+          nTable.rows.identical.hidden = nTotal - nAdd - nModify < 1;
+          nTable.rows.total.cells[2].replaceChildren(nTotal);
+          headerTable.replaceChildren(
+            ...header.map(([name, found]) => headerRow(name, found)),
+          );
+          preview.hidden = false;
+          form.elements.submit.replaceChildren("Import transactions");
+          form.elements.submit.disabled =
+            nAdd + nModify < 1 || header.every(([, found]) => !found);
+        } catch (e) {
+          error.replaceChildren(e);
+          error.hidden = false;
+        }
+      }
+
+      const [nTable, headerTable] = preview.getElementsByTagName("table");
+
+      function headerRow(name, found) {
+        const th = document.createElement("th");
+        th.append(name);
+        const td = document.createElement("td");
+        td.append(icon[Number(found)]);
+        const tr = document.createElement("tr");
+        tr.append(th, td);
+        return tr;
+      }
+
+      const icon = ["\u2753", "\u27A1\uFE0F"];
+
+      function onError() {
+        error.replaceChildren(reader.error);
+        error.hidden = false;
+      }
+
+      async function onSubmit(event) {
+        event.preventDefault();
+        form.elements.submit.disabled = true;
+        form.elements.submit.replaceChildren("Importing transactions ...");
+        try {
+          await new Promise((resolve, reject) =>
+            google.script.run
+              .withSuccessHandler(resolve)
+              .withFailureHandler(reject)
+              .doImport(reader.result, false),
+          );
+          google.script.host.close();
+        } catch (e) {
+          error.replaceChildren(e);
+          error.hidden = false;
+          form.elements.submit.replaceChildren("Import transactions");
+          form.elements.submit.disabled = false;
+        }
+      }
+    </script>
   </body>
 </html>
