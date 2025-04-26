@@ -15,10 +15,18 @@
           id="file"
           type="file"
           accept="text/csv"
-          onclick="this.value = ''"
-          ondrop="this.value = ''"
+          onclick="cancel(event)"
+          ondrop="cancel(event)"
           onchange="onChange(event)"
         />
+      </div>
+      <div class="block">
+        <div class="form-group" hidden>
+          <label for="crosswalk">CSV format</label>
+          <select id="crosswalk" onchange="onChange(event)">
+            <option>Tiller (bypass remap)</option>
+          </select>
+        </div>
       </div>
       <div class="block">
         <div hidden>
@@ -60,32 +68,56 @@
       </div>
     </form>
     <script>
-      function onChange(event) {
+      function cancel() {
+        ++n;
         preview.hidden = true;
-        error.hidden = true;
+        errorDiv.hidden = true;
+        form.elements.file.value = "";
+        form.elements.crosswalk.parentElement.hidden = true;
+        form.elements.crosswalk.value = "";
+        form.elements.submit.parentElement.hidden = true;
+      }
+
+      let n = 0;
+      const preview = document.getElementById("preview");
+      const [errorDiv] = document.getElementsByClassName("error");
+      const [form] = document.forms;
+
+      function onChange() {
+        preview.hidden = true;
+        errorDiv.hidden = true;
         form.elements.submit.disabled = true;
         form.elements.submit.replaceChildren("Loading preview ...");
         form.elements.submit.parentElement.hidden = false;
-        const [file] = event.target.files;
+        const [file] = form.elements.file.files;
         reader.readAsText(file);
       }
 
-      const preview = document.getElementById("preview");
-      const [error] = document.getElementsByClassName("error");
-      const [form] = document.forms;
       const reader = new FileReader();
       reader.addEventListener("load", () => onLoad());
       reader.addEventListener("error", () => onError());
 
       async function onLoad() {
         try {
-          const { nAdd, nModify, nTotal, header } = await new Promise(
-            (resolve, reject) =>
+          const i = ++n;
+          const { crosswalk, crosswalks, nAdd, nModify, nTotal, header } =
+            await new Promise((resolve, reject) =>
               google.script.run
                 .withSuccessHandler(resolve)
                 .withFailureHandler(reject)
-                .doImport(reader.result, true),
+                .doImport(reader.result, form.elements.crosswalk.value, true),
+            );
+          // Suppress stale calls
+          if (i !== n) {
+            return;
+          }
+          form.elements.crosswalk.replaceChildren(
+            bypassRemap,
+            h("hr"),
+            ...crosswalks.map((label) => h("option", label)),
           );
+          form.elements.crosswalk.value = crosswalk;
+          form.elements.crosswalk.parentElement.hidden = crosswalks.length < 1;
           nTable.rows.add.cells[2].replaceChildren(nAdd);
           nTable.rows.add.hidden = nAdd < 1;
           nTable.rows.modify.cells[2].replaceChildren(nModify);
@@ -96,35 +128,71 @@
           nTable.rows.identical.hidden = nTotal - nAdd - nModify < 1;
           nTable.rows.total.cells[2].replaceChildren(nTotal);
           headerTable.replaceChildren(
-            ...header.map(([name, found]) => headerRow(name, found)),
+            ...header.map(({ name, found, error, summary }) =>
+              headerRow(name, found, error, summary),
+            ),
           );
           preview.hidden = false;
           form.elements.submit.replaceChildren("Import transactions");
           form.elements.submit.disabled =
-            nAdd + nModify < 1 || header.every(([, found]) => !found);
+            nAdd + nModify < 1 ||
+            header.every(({ found }) => !found) ||
+            header.some(({ error, summary }) => isError(error, summary));
         } catch (e) {
-          error.replaceChildren(e);
-          error.hidden = false;
+          errorDiv.replaceChildren(e);
+          errorDiv.hidden = false;
         }
+      }
+
+      const [bypassRemap] = form.elements.crosswalk.options;
+
+      function h(tagName, ...args) {
+        const element = document.createElement(tagName);
+        const { false: props, true: children } = Object.groupBy(
+          args,
+          (arg) => typeof arg !== "object" || arg instanceof HTMLElement,
+        );
+        if (props !== undefined) {
+          Object.assign(element, ...props);
+        }
+        if (children !== undefined) {
+          element.append(...children.filter((child) => child !== undefined));
+        }
+        return element;
       }
 
       const [nTable, headerTable] = preview.getElementsByTagName("table");
 
-      function headerRow(name, found) {
-        const th = document.createElement("th");
-        th.append(name);
-        const td = document.createElement("td");
-        td.append(icon[Number(found)]);
-        const tr = document.createElement("tr");
-        tr.append(th, td);
-        return tr;
+      function headerRow(name, found, error, summary) {
+        const td = h("td", error ?? summary);
+        if (isError(error, summary)) {
+          td.classList.add("error");
+        }
+        return h(
+          "tr",
+          h("th", name),
+          h(
+            "td",
+            isError(error, summary) ? "\u26A0\uFE0F" : icon[Number(found)],
+          ),
+          td,
+        );
+      }
+
+      function isError(error, summary) {
+        switch (summary) {
+          case "Invalid Date":
+          case "NaN":
+            return true;
+        }
+        return error !== undefined;
       }
 
       const icon = ["\u2753", "\u27A1\uFE0F"];
 
       function onError() {
-        error.replaceChildren(reader.error);
-        error.hidden = false;
+        errorDiv.replaceChildren(reader.error);
+        errorDiv.hidden = false;
       }
 
       async function onSubmit(event) {
@@ -136,12 +204,12 @@
             google.script.run
               .withSuccessHandler(resolve)
               .withFailureHandler(reject)
-              .doImport(reader.result, false),
+              .doImport(reader.result, form.elements.crosswalk.value, false),
           );
           google.script.host.close();
         } catch (e) {
-          error.replaceChildren(e);
-          error.hidden = false;
+          errorDiv.replaceChildren(e);
+          errorDiv.hidden = false;
           form.elements.submit.replaceChildren("Import transactions");
           form.elements.submit.disabled = false;
         }
