@@ -12,8 +12,9 @@ function onOpen() {
 
 function start() {
   const ui = SpreadsheetApp.getUi();
-  const html = HtmlService.createHtmlOutputFromFile("Index");
-  ui.showModalDialog(html, "Import/remap CSV");
+  const html =
+    HtmlService.createHtmlOutputFromFile("Index").setTitle("Import/remap CSV");
+  ui.showSidebar(html);
 }
 
 /**

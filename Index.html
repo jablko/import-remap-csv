@@ -7,7 +7,7 @@
       href="https://ssl.gstatic.com/docs/script/css/add-ons1.css"
     />
   </head>
-  <body>
+  <body class="sidebar">
     <form onsubmit="onSubmit(event)">
       <div class="block form-group">
         <label for="file">Drag and drop or choose a CSV file to preview</label>
@@ -31,9 +31,7 @@
       <div class="block">
         <div hidden>
           <button id="submit" class="action"></button>
-          <button type="button" onclick="google.script.host.close()">
-            Cancel
-          </button>
+          <button type="button" onclick="cancel(event)">Cancel</button>
         </div>
       </div>
       <div class="block"><div class="error" hidden></div></div>
@@ -206,7 +204,7 @@
               .withFailureHandler(reject)
               .doImport(reader.result, form.elements.crosswalk.value, false),
           );
-          google.script.host.close();
+          cancel();
         } catch (e) {
           errorDiv.replaceChildren(e);
           errorDiv.hidden = false;
