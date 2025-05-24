@@ -61,7 +61,7 @@
             </tr>
           </table>
           <h2>Which headers match</h2>
-          <table></table>
+          <table onclick="activate(event)"></table>
         </div>
       </div>
     </form>
@@ -69,7 +69,7 @@
       function cancel() {
         ++n;
         preview.hidden = true;
-        errorDiv.hidden = true;
+        error.hidden = true;
         form.elements.file.value = "";
         form.elements.crosswalk.parentElement.hidden = true;
         form.elements.crosswalk.value = "";
@@ -78,12 +78,12 @@
 
       let n = 0;
       const preview = document.getElementById("preview");
-      const [errorDiv] = document.getElementsByClassName("error");
+      const [error] = document.getElementsByClassName("error");
       const [form] = document.forms;
 
       function onChange() {
         preview.hidden = true;
-        errorDiv.hidden = true;
+        error.hidden = true;
         form.elements.submit.disabled = true;
         form.elements.submit.replaceChildren("Loading preview ...");
         form.elements.submit.parentElement.hidden = false;
@@ -126,8 +126,8 @@
           nTable.rows.identical.hidden = nTotal - nAdd - nModify < 1;
           nTable.rows.total.cells[2].replaceChildren(nTotal);
           headerTable.replaceChildren(
-            ...header.map(({ name, found, error, summary }) =>
-              headerRow(name, found, error, summary),
+            ...header.map(({ name, found, summary }) =>
+              headerRow(name, found, summary),
             ),
           );
           preview.hidden = false;
@@ -135,10 +135,10 @@
           form.elements.submit.disabled =
             nAdd + nModify < 1 ||
             header.every(({ found }) => !found) ||
-            header.some(({ error, summary }) => isError(error, summary));
+            header.some(({ summary }) => isError(summary));
         } catch (e) {
-          errorDiv.replaceChildren(e);
-          errorDiv.hidden = false;
+          error.replaceChildren(e);
+          error.hidden = false;
         }
       }
 
@@ -161,36 +161,38 @@
 
       const [nTable, headerTable] = preview.getElementsByTagName("table");
 
-      function headerRow(name, found, error, summary) {
-        const td = h("td", error ?? summary);
-        if (isError(error, summary)) {
+      function headerRow(name, found, summary) {
+        const td = h(
+          "td",
+          summary?.message === undefined
+            ? summary
+            : h("a", { href: summary.url }, summary.message),
+        );
+        if (isError(summary)) {
           td.classList.add("error");
         }
         return h(
           "tr",
           h("th", name),
-          h(
-            "td",
-            isError(error, summary) ? "\u26A0\uFE0F" : icon[Number(found)],
-          ),
+          h("td", isError(summary) ? "\u26A0\uFE0F" : icon[Number(found)]),
           td,
         );
       }
 
-      function isError(error, summary) {
+      function isError(summary) {
         switch (summary) {
           case "Invalid Date":
           case "NaN":
             return true;
         }
-        return error !== undefined;
+        return summary?.message !== undefined;
       }
 
       const icon = ["\u2753", "\u27A1\uFE0F"];
 
       function onError() {
-        errorDiv.replaceChildren(reader.error);
-        errorDiv.hidden = false;
+        error.replaceChildren(reader.error);
+        error.hidden = false;
       }
 
       async function onSubmit(event) {
@@ -206,11 +208,25 @@
           );
           cancel();
         } catch (e) {
-          errorDiv.replaceChildren(e);
-          errorDiv.hidden = false;
+          error.replaceChildren(e);
+          error.hidden = false;
           form.elements.submit.replaceChildren("Import transactions");
           form.elements.submit.disabled = false;
         }
+      }
+
+      async function activate(event) {
+        if (event.target.search === undefined) {
+          return;
+        }
+        event.preventDefault();
+        const searchParams = new URLSearchParams(event.target.search);
+        await new Promise((resolve, reject) =>
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .activate(searchParams.get("gid"), searchParams.get("range")),
+        );
       }
     </script>
   </body>
