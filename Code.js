@@ -78,6 +78,7 @@ function doImport(csv, crosswalk, preview) {
   prepAmount(header, data);
   prepDescription(header, data);
   prepID(header, data, tHeader);
+  autoCat(header, data);
   /**
    * For duplicate IDs, map CSV transactions -> spreadsheet transactions by ID
    * occurrence number.
@@ -115,7 +116,6 @@ function doImport(csv, crosswalk, preview) {
   const cMin = Math.min(...cMap.filter((j) => j !== undefined));
   const cMax = Math.max(...cMap.filter((j) => j !== undefined));
   const addCMin = Math.min(cMin, tHeader.get("Date Added") ?? Math.min());
-  const addCMax = Math.max(cMax, tHeader.get("Date Added") ?? Math.max());
   // Partition transactions to add and ones to modify
   /** @type {(CellValue | Date)[][]} */
   const addData = [];
@@ -123,7 +123,8 @@ function doImport(csv, crosswalk, preview) {
   let modifyData = [];
   for (const [i, row] of data.entries()) {
     const overlay = [];
-    for (const [j, value] of row.entries()) {
+    // AutoCat can make row sparse
+    for (const [j, value] of Object.entries(row)) {
       overlay[/** @type {never} */ (cMap[j])] = value;
     }
     if (rMap[i] === undefined) {
@@ -190,11 +191,12 @@ function doImport(csv, crosswalk, preview) {
       Logger.log(`Grow spreadsheet by ${nGrow} rows`);
       sheet.insertRowsAfter(sheet.getMaxRows(), nGrow);
     }
+    // Rightmost column can be sparse if an AutoCat rule does not match any rows
     const range = sheet.getRange(
       sheet.getLastRow() + 1,
       addCMin + 1,
       addData.length,
-      addCMax - addCMin + 1,
+      Math.max(...addData.map((row) => row.length)),
     );
     Logger.log(`Add transactions to range ${range.getA1Notation()}`);
     noDataValidationSetValues(range, addData);
@@ -940,6 +942,120 @@ function prepID(header, data, tHeader) {
     }
   }
 }
+
+/**
+ * @callback Predicate
+ * @param {CellValue | Date} a
+ * @param {unknown} b
+ * @returns {boolean}
+ */
+
+/**
+ * Run AutoCat on import.
+ *
+ * @param {Map<string, number>} header
+ * @param {Iterable<(CellValue | Date)[]>} data
+ */
+function autoCat(header, data) {
+  const sheet = ss.getSheetByName("AutoCat");
+  if (sheet === null) {
+    Logger.log("AutoCat sheet not found");
+    return;
+  }
+  const range = sheet.getDataRange();
+  Logger.log(`Get AutoCat rules from range ${range.getA1Notation()}`);
+  /** @type {[(readonly string[])?, ...(readonly (readonly unknown[])[])]} */
+  const [autoCatHeaderRow, ...autoCatData] = range.getValues();
+  if (autoCatHeaderRow === undefined) {
+    throw new Error("Empty AutoCat sheet");
+  }
+  /** @type Predicate[] */
+  const conjunction = [];
+  /**
+   * AutoCat columns -> CSV columns.
+   *
+   * @type {readonly (number | undefined)[]}
+   */
+  const autoCatMap = autoCatHeaderRow.map((name, j) => {
+    for (const [suffix, predicate] of predicates) {
+      if (name.toUpperCase().endsWith(suffix)) {
+        conjunction[j] = predicate;
+        return header.get(name.slice(0, -suffix.length));
+      }
+    }
+    const y = header.get(name) ?? header.size;
+    header.set(name, y);
+    return y;
+  });
+  Logger.log("Run AutoCat on import");
+  for (const row of data) {
+    for (const autoCatRow of autoCatData) {
+      if (match(row, autoCatRow)) {
+        assign(row, autoCatRow);
+        break;
+      }
+    }
+  }
+
+  /**
+   * @param {readonly (CellValue | Date)[]} row
+   * @param {readonly unknown[]} autoCatRow
+   */
+  function match(row, autoCatRow) {
+    return conjunction.every(
+      (predicate, j) =>
+        autoCatRow[j] === "" ||
+        predicate(row[/** @type {never} */ (autoCatMap[j])], autoCatRow[j]),
+    );
+  }
+
+  /**
+   * @param {(CellValue | Date)[]} row
+   * @param {readonly unknown[]} autoCatRow
+   */
+  function assign(row, autoCatRow) {
+    for (const [j, value] of autoCatRow.entries()) {
+      // Columns either have a suffix/predicate or they are replacement
+      // values
+      if (value !== "" && conjunction[j] === undefined) {
+        row[/** @type {never} */ (autoCatMap[j])] = /** @type {never} */ (
+          value
+        );
+      }
+    }
+  }
+}
+
+/** @type {readonly (readonly [string, Predicate])[]} */
+const predicates = [
+  [
+    " CONTAINS",
+    (a, b) => String(a).toUpperCase().includes(String(b).toUpperCase()),
+  ],
+  [
+    " EQUALS",
+    (a, b) =>
+      equals(
+        typeof a !== "string" ? a : a.toUpperCase(),
+        String(b).toUpperCase(),
+      ),
+  ],
+  [
+    " STARTS WITH",
+    (a, b) => String(a).toUpperCase().startsWith(String(b).toUpperCase()),
+  ],
+  [
+    " ENDS WITH",
+    (a, b) => String(a).toUpperCase().endsWith(String(b).toUpperCase()),
+  ],
+  [
+    " REGEX",
+    (a, b) =>
+      new RegExp(/** @type {never} */ (b), "i").test(/** @type {never} */ (a)),
+  ],
+  [" MIN", (a, b) => /** @type {never} */ (a) >= /** @type {never} */ (b)],
+  [" MAX", (a, b) => /** @type {never} */ (a) <= /** @type {never} */ (b)],
+];
 
 const now = new Date();
 
