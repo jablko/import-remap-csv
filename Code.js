@@ -166,7 +166,13 @@ function doImport(csv, crosswalk, preview) {
       header: headerRow.map((name, j) => ({
         name,
         found: tHeader.get(name) !== undefined,
-        summary: summarize(data, j),
+        // Errors are in the first row because that is where the array formulas
+        // are
+        summary:
+          /** @type {Partial<DetailedCellError>?} */ (data[0]?.[j])?.message !==
+          undefined
+            ? data[0][j]
+            : summarize(addData, /** @type {never} */ (cMap[j]) - addCMin),
       })),
     };
   }
@@ -980,13 +986,8 @@ const msPerDay = 24 * msPerHour;
  */
 function summarize(data, j) {
   const [first, ...rest] = data;
-  if (first === undefined) {
+  if (first === undefined || Number.isNaN(j)) {
     return;
-  }
-  if (
-    /** @type {Partial<DetailedCellError>?} */ (first[j])?.message !== undefined
-  ) {
-    return first[j];
   }
   if (first[j] instanceof Date) {
     const column = data.map((row) => row[j]);
