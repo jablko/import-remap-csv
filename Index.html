@@ -34,6 +34,28 @@
           <button type="button" onclick="cancel(event)">Cancel</button>
         </div>
       </div>
+      <div class="block">
+        <div hidden>
+          <h2></h2>
+          <table id="history">
+            <caption>
+              <ul>
+                <li>Click on a date to review added transactions by batch</li>
+                <li>
+                  Click on <b>Data</b> > <b>Remove filter</b> when you are done
+                </li>
+              </ul>
+            </caption>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Number of added transactions</th>
+              </tr>
+            </thead>
+            <tbody onclick="filter(event)"></tbody>
+          </table>
+        </div>
+      </div>
       <div class="block"><div class="error" hidden></div></div>
       <div class="block">
         <div id="preview" hidden>
@@ -66,7 +88,7 @@
       </div>
     </form>
     <script>
-      function cancel() {
+      async function cancel() {
         ++n;
         preview.hidden = true;
         error.hidden = true;
@@ -74,6 +96,7 @@
         form.elements.crosswalk.parentElement.hidden = true;
         form.elements.crosswalk.value = "";
         form.elements.submit.parentElement.hidden = true;
+        await loadHistory();
       }
 
       let n = 0;
@@ -84,6 +107,7 @@
       function onChange() {
         preview.hidden = true;
         error.hidden = true;
+        history.parentElement.hidden = true;
         form.elements.submit.disabled = true;
         form.elements.submit.replaceChildren("Loading preview ...");
         form.elements.submit.parentElement.hidden = false;
@@ -91,6 +115,7 @@
         reader.readAsText(file);
       }
 
+      const history = document.getElementById("history");
       const reader = new FileReader();
       reader.addEventListener("load", () => onLoad());
       reader.addEventListener("error", () => onError());
@@ -206,7 +231,7 @@
               .withFailureHandler(reject)
               .doImport(reader.result, form.elements.crosswalk.value, false),
           );
-          cancel();
+          await cancel();
         } catch (e) {
           error.replaceChildren(e);
           error.hidden = false;
@@ -228,6 +253,91 @@
             .activate(searchParams.get("gid"), searchParams.get("range")),
         );
       }
+
+      async function filter(event) {
+        if (event.target.dateTime === undefined) {
+          return;
+        }
+        event.preventDefault();
+        await new Promise((resolve, reject) =>
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .filter((Date.parse(event.target.dateTime) - epoch) / msPerDay),
+        );
+      }
+
+      const msPerSecond = 1000;
+      const msPerMinute = 60 * msPerSecond;
+      const msPerHour = 60 * msPerMinute;
+      const msPerDay = 24 * msPerHour;
+      const epoch = Date.UTC(1899, 11, 30);
+
+      async function loadHistory() {
+        if (!history.parentElement.hidden) {
+          return;
+        }
+        history.previousElementSibling.replaceChildren("Loading history ...");
+        history.hidden = true;
+        history.parentElement.hidden = false;
+        try {
+          const [tbody] = history.tBodies;
+          const data = Object.entries(
+            await new Promise((resolve, reject) =>
+              google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)
+                .loadHistory(),
+            ),
+          );
+          if (data.length < 1) {
+            history.parentElement.hidden = true;
+            return;
+          }
+          data.sort(([a], [b]) => b - a);
+          tbody.replaceChildren(
+            ...data.map(([serialNumber, n]) => historyRow(serialNumber, n)),
+          );
+          history.hidden = false;
+          history.previousElementSibling.replaceChildren("History");
+        } catch (e) {
+          error.replaceChildren(e);
+          error.hidden = false;
+        }
+      }
+
+      function historyRow(serialNumber, n) {
+        const date = new Date(serialNumber * msPerDay + epoch);
+        const dateTime = date.toJSON();
+        return h(
+          "tr",
+          h(
+            "td",
+            h("a", h("time", { dateTime, title: dateTime }, format(date))),
+          ),
+          h("td", { align: "right" }, n),
+        );
+      }
+
+      function format(date) {
+        const daysAgo = Math.trunc((date - now) / msPerDay);
+        const weeksAgo = Math.trunc(daysAgo / daysPerWeek);
+        return Math.abs(weeksAgo) < 1
+          ? relativeFormatter.format(daysAgo, "day")
+          : Math.abs(weeksAgo) < 4
+            ? relativeFormatter.format(weeksAgo, "week")
+            : absoluteFormatter.format(date);
+      }
+
+      const now = Date.now();
+      const daysPerWeek = 7;
+      const relativeFormatter = new Intl.RelativeTimeFormat(undefined, {
+        numeric: "auto",
+      });
+      const absoluteFormatter = new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+      });
+      loadHistory();
     </script>
   </body>
 </html>

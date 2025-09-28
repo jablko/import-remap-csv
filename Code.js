@@ -1172,3 +1172,49 @@ function activate(id, notation) {
   }
   sheet.getRange(notation).activate();
 }
+
+/**
+ * Review added transactions by batch.
+ *
+ * @param {number} serialNumber
+ */
+function filter(serialNumber) {
+  const sheet = ss.getSheetByName("Transactions");
+  if (sheet === null) {
+    throw new Error("Transactions sheet not found");
+  }
+  const filter = sheet.getFilter() ?? sheet.getDataRange().createFilter();
+  const tHeader = getHeader(sheet);
+  /** `whenDateEqualTo()` does not distinguish different times on the same day. */
+  const criteria = SpreadsheetApp.newFilterCriteria()
+    .whenNumberEqualTo(serialNumber)
+    .build();
+  filter.setColumnFilterCriteria(
+    /** @type {number} */ (tHeader.get("Date Added")) + 1,
+    criteria,
+  );
+  sheet.activate();
+}
+
+/** Summarize transactions by date added. */
+function loadHistory() {
+  const sheet = ss.getSheetByName("Transactions");
+  if (sheet === null) {
+    throw new Error("Transactions sheet not found");
+  }
+  const tHeader = getHeader(sheet);
+  /** @type {Record<number, number>} */
+  const counter = {};
+  for (const dateAdded of getColumn(
+    sheet,
+    /** @type {number} */ (tHeader.get("Date Added")) + 1,
+  )) {
+    /** @type {unknown} */
+    const serialNumber = toSerialNumber(dateAdded);
+    //(counter[/** @type {never} */ (serialNumber)] ??= 0)++;
+    counter[/** @type {never} */ (serialNumber)] =
+      counter[/** @type {never} */ (serialNumber)] ?? 0;
+    counter[/** @type {never} */ (serialNumber)]++;
+  }
+  return counter;
+}
