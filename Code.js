@@ -989,10 +989,18 @@ function autoCat(header, data) {
   });
   Logger.log("Run AutoCat on import");
   for (const row of data) {
-    for (const autoCatRow of autoCatData) {
-      if (match(row, autoCatRow)) {
-        assign(row, autoCatRow);
-        break;
+    /**
+     * Repeat until nothing changes or caught in a loop.
+     *
+     * @type {Set<string>}
+     */
+    const seen = new Set();
+    while (seen.size < seen.add(JSON.stringify(row)).size) {
+      for (const autoCatRow of autoCatData) {
+        if (match(row, autoCatRow)) {
+          assign(row, autoCatRow);
+          break;
+        }
       }
     }
   }
